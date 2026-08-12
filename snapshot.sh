@@ -4,8 +4,6 @@
 # and save it as image.jpeg, auto-incrementing the filename if it already
 # exists (image_1.jpeg, image_2.jpeg, ...).
 
-set -euo pipefail
-
 WIDTH=1280
 HEIGHT=1024
 TIMEOUT_SECS=7
