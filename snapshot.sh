@@ -21,3 +21,8 @@ timeout "${TIMEOUT_SECS}" gst-launch-1.0 aravissrc num-buffers=1 \
     ! videoconvert \
     ! avenc_tiff \
     ! filesink location="frame.tiff"
+# Test
+# Save the raw GRAY16_LE frame with no encoding at all
+gst-launch-1.0 aravissrc ! identity eos-after=1 ! video/x-raw,format=GRAY16_LE,width=1280,height=1024 ! filesink location=frame.raw
+# Convert to tiff
+convert -size 1280x1024 -depth 16 GRAY:frame.raw frame.tiff
