@@ -84,6 +84,7 @@ if get_option('tests')
 		['arv-chunk-parser-test',	'arvchunkparsertest.c'],
 		['arv-heartbeat-test',		'arvheartbeattest.c'],
 		['arv-acquisition-test',	'arvacquisitiontest.c'],
+		['arv-snapshot',    'arvsnapshot.c'],
 		['arv-example',			'arvexample.c'],
 		['arv-auto-packet-size-test',	'arvautopacketsizetest.c'],
 		['arv-device-scan-test',	'arvdevicescantest.c'],
