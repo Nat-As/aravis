@@ -1,14 +1,19 @@
 #!/bin/bash
 #
 # snapshot.sh - Grab a single 1280x1024 frame from an Aravis (GenICam) camera
-# and save it as image.jpeg, auto-incrementing the filename if it already
-# exists (image_1.jpeg, image_2.jpeg, ...).
+# and save it directly as frame.tiff (no jpeg intermediate), auto-incrementing
+# the filename if it already exists (frame_1.tiff, frame_2.tiff, ...).
+#
+# Requires the gst-libav plugin set for the avenc_tiff element:
+#   sudo apt install gstreamer1.0-libav      (Debian/Ubuntu)
+#   sudo yum install gstreamer1-libav        (RHEL/Fedora)
+# Verify with: gst-inspect-1.0 avenc_tiff
 
 WIDTH=1280
 HEIGHT=1024
 TIMEOUT_SECS=7
-BASENAME="image"
-EXT="jpeg"
+BASENAME="frame"
+EXT="tiff"
 
 # Work in a temp file first so we never leave a half-written/corrupt file
 # behind if the capture fails or times out badly.
@@ -20,7 +25,7 @@ echo "Capturing ${WIDTH}x${HEIGHT} frame..."
 timeout "${TIMEOUT_SECS}" gst-launch-1.0 aravissrc num-buffers=1 \
     ! video/x-raw,width="${WIDTH}",height="${HEIGHT}" \
     ! videoconvert \
-    ! jpegenc \
+    ! avenc_tiff \
     ! filesink location="${TMPFILE}" \
     >/dev/null 2>&1 || true   # timeout kills the hung pipeline; ignore its exit code
 
@@ -30,7 +35,7 @@ if [ ! -s "${TMPFILE}" ]; then
     exit 1
 fi
 
-# Figure out the next available filename: image.jpeg, image_1.jpeg, image_2.jpeg, ...
+# Figure out the next available filename: frame.tiff, frame_1.tiff, frame_2.tiff, ...
 target="${BASENAME}.${EXT}"
 if [ -e "${target}" ]; then
     n=1
