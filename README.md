@@ -16,12 +16,106 @@ cameras. It currently implements the gigabit ethernet and USB3 protocols used by
 industrial cameras. It also provides a basic ethernet camera simulator and a
 simple video viewer.
 
-<p align="center">
-  <img src="viewer/data/aravis.png"/>
-  <img src="viewer/data/aravis-video.png"/>
-</p>
-
 Aravis is released under [LGPL-2.1-or-later](https://spdx.org/licenses/LGPL-2.1-or-later.html).
+
+# Installation
+
+These instructions cover cloning this fork, installing build dependencies, and compiling/installing Aravis on Linux (tested on kernel 4.9, Amlogic-based SoC board). They also cover two helper scripts included in this fork for working with the iNocturn USB3 Vision camera.
+
+## 1. Clone the repo
+
+```bash
+git clone https://github.com/Nat-As/aravis.git
+cd aravis
+```
+
+## 2. Install build dependencies
+
+Aravis uses Meson (>= 0.57.0) as its build system, along with GLib2, libxml2, zlib, and optionally libusb1 (USB3 Vision), GTK+3, and GStreamer (viewer + `aravissrc` plugin).
+
+```bash
+sudo apt update
+sudo apt install -y build-essential pkg-config ninja-build \
+    libglib2.0-dev libxml2-dev zlib1g-dev libusb-1.0-0-dev \
+    gobject-introspection libgirepository1.0-dev \
+    libgtk-3-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+    gstreamer1.0-libav libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+```
+
+> `gstreamer1.0-libav` is required for the `avenc_tiff` element used by `snapshot.sh` below — without it, TIFF encoding in the capture pipeline will fail to find a matching element.
+
+## 3. Install Meson via pip3
+
+Ubuntu's packaged Meson is typically older than the `>= 0.57.0` this project requires (you'll see an error like `unknown method "project_source_root"` if you try to build with an older version). Install a current Meson via pip instead of `apt`:
+
+```bash
+# Remove the distro package if installed, to avoid PATH conflicts
+sudo apt remove -y meson
+
+# Install a current Meson + Ninja locally
+pip3 install --user --upgrade meson ninja
+
+# Make sure ~/.local/bin is on your PATH
+export PATH="$HOME/.local/bin:$PATH"
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+
+meson --version   # should report 0.57.0 or newer
+```
+
+## 4. Build
+
+```bash
+meson setup build --prefix=/usr/local
+ninja -C build
+```
+
+If you only need the core library (skip the viewer and GStreamer plugin to reduce dependencies):
+
+```bash
+meson setup build --prefix=/usr/local -Dviewer=disabled -Dgst-plugin=disabled
+ninja -C build
+```
+
+## 5. Install
+
+```bash
+sudo ninja -C build install
+sudo ldconfig
+```
+
+## 6. Verify
+
+```bash
+pkg-config --modversion aravis-0.10
+```
+
+## 7. Install ImageMagick (used by `snapshot.sh` for raw → TIFF conversion)
+
+```bash
+sudo apt install -y imagemagick
+convert -version
+```
+
+## Helper scripts
+
+This fork includes two shell scripts for working with the iNocturn USB3 Vision camera:
+
+- **`setup-iNocturn.sh`** — sends the camera's configured settings (pixel format, resolution, etc.) to the device via `arv-tool`/GenICam features before capture.
+- **`snapshot.sh`** — captures a single frame via `aravissrc`/GStreamer and saves it as a TIFF (`frame.tiff`, auto-incrementing to `frame_1.tiff`, `frame_2.tiff`, etc. if the file already exists).
+
+Typical usage:
+
+```bash
+./setup-iNocturn.sh
+./snapshot.sh
+```
+
+### Known issues (in progress)
+
+- **Pixel format mapping**: Mono10 output currently shows visible artifacts (alternating blank columns), likely caused by a caps/pixel-format mismatch between the requested GStreamer caps and the camera's native Mono10 output. Not yet resolved — tracking down the correct `GRAY16_LE` caps negotiation.
+- **Pipeline EOF/termination**: `aravissrc` does not reliably send EOS after `num-buffers` is reached (a known quirk with GStreamer live sources), which can cause the capture pipeline to hang rather than exit cleanly. Currently mitigated with `timeout` around the capture command in `snapshot.sh`; a cleaner fix using `identity eos-after=1` is being evaluated.
+
+---
 
 ### Documentation
 
