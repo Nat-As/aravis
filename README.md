@@ -20,7 +20,7 @@ Aravis is released under [LGPL-2.1-or-later](https://spdx.org/licenses/LGPL-2.1-
 
 # Installation
 
-These instructions cover cloning this fork, installing build dependencies, and compiling/installing Aravis on Linux (tested on kernel 4.9, Amlogic-based SoC board). They also cover two helper scripts included in this fork for working with the iNocturn USB3 Vision camera.
+These instructions cover cloning this fork, installing build dependencies, and compiling/installing Aravis on Linux (tested on kernel 4.9, Amlogic-based SoC board). They also cover the tools included in this fork for capturing frames from the iNocturn USB3 Vision camera.
 
 ## 1. Clone the repo
 
@@ -39,10 +39,8 @@ sudo apt install -y build-essential pkg-config ninja-build \
     libglib2.0-dev libxml2-dev zlib1g-dev libusb-1.0-0-dev \
     gobject-introspection libgirepository1.0-dev \
     libgtk-3-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-    gstreamer1.0-libav libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+    libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 ```
-
-> `gstreamer1.0-libav` is required for the `avenc_tiff` element used by `snapshot.sh` below — without it, TIFF encoding in the capture pipeline will fail to find a matching element.
 
 ## 3. Install Meson via pip3
 
@@ -89,31 +87,63 @@ sudo ldconfig
 pkg-config --modversion aravis-0.10
 ```
 
-## 7. Install ImageMagick (used by `snapshot.sh` for raw → TIFF conversion)
+## 7. Install ImageMagick (used by `snapshot.sh` to convert raw camera buffers into TIFF)
 
 ```bash
 sudo apt install -y imagemagick
 convert -version
 ```
 
-## Helper scripts
+## Usage
 
-This fork includes two shell scripts for working with the iNocturn USB3 Vision camera:
+Capturing a frame from the iNocturn camera uses three pieces together: a camera-configuration script, a small C program built as part of the normal meson test suite, and a wrapper script that ties capture and conversion together.
 
-- **`setup-iNocturn.sh`** — sends the camera's configured settings (pixel format, resolution, etc.) to the device via `arv-tool`/GenICam features before capture.
-- **`snapshot.sh`** — captures a single frame via `aravissrc`/GStreamer and saves it as a TIFF (`frame.tiff`, auto-incrementing to `frame_1.tiff`, `frame_2.tiff`, etc. if the file already exists).
+### iNocturn Image acquisition
 
-Typical usage:
+**`setup-iNocturn.sh`**
+Sends the camera's required settings (pixel format `Mono10`, resolution `1280x1024`, etc.) to the device via `arv-tool`/GenICam features. Run this once per session before capturing, and any time the camera has been power-cycled or reconnected.
+
+**`tests/arvsnapshot.c` → `build/tests/arv-snapshot`**
+A small program built alongside the other Aravis test/example binaries (see `tests/meson.build`, right next to `arv-acquisition-test`). It talks to the camera directly through the Aravis API to capture a RAW image `arv_camera_acquisition()` call as `arv-acquisition-test`.
+
+Run directly if you just want a raw image with no conversion:
+```bash
+./build/tests/arv-snapshot frame.raw
+```
+
+**`snapshot.sh`**
+Wraps `arv-snapshot` and `convert` with ImageMagick to a tiff file. It:
+1. Runs `build/tests/arv-snapshot` to produce a raw capture and checks the reported `DataSize` against the expected `1280 × 1024 × 2` bytes for Mono10 (16-bit container, 10 bits significant)
+2. converts the raw buffer into **two** TIFFs — see below — auto-incrementing both filenames together if `frame.tiff` already exists (`frame.tiff`/`frame_view.tiff` → `frame_1.tiff`/`frame_1_view.tiff` → ...).
+
+### Typical usage
 
 ```bash
 ./setup-iNocturn.sh
 ./snapshot.sh
 ```
 
-### Known issues (in progress)
+### RAW to TIFF conversion
 
-- **Pixel format mapping**: Mono10 output currently shows visible artifacts (alternating blank columns), likely caused by a caps/pixel-format mismatch between the requested GStreamer caps and the camera's native Mono10 output. Not yet resolved — tracking down the correct `GRAY16_LE` caps negotiation.
-- **Pipeline EOF/termination**: `aravissrc` does not reliably send EOS after `num-buffers` is reached (a known quirk with GStreamer live sources), which can cause the capture pipeline to hang rather than exit cleanly. Currently mitigated with `timeout` around the capture command in `snapshot.sh`; a cleaner fix using `identity eos-after=1` is being evaluated.
+Mono10 pixel values range `0–1023`, but the camera delivers them in a 16-bit-per-pixel container without scaling them up. `snapshot.sh` produces both a pixel-accurate copy and a version normalized for human viewing:
+
+```bash
+# Pixel-accurate: preserves the raw 10-bit values exactly (0-1023), for
+# measurement/analysis. Looks very dark to the eye, since real values only
+# span a small fraction of the 16-bit container's 0-65535 range.
+convert -size 1280x1024 -depth 16 -endian LSB GRAY:frame.raw frame.tiff
+
+# Viewable: same data, linearly stretched from 0-1023 up to 0-65535 so it
+# looks normally bright.
+convert -size 1280x1024 -depth 16 -endian LSB GRAY:frame.raw -level 0,1023 frame_view.tiff
+```
+
+`-endian LSB` matters: the camera's Mono10 data is little-endian, and ImageMagick's raw `GRAY:` reader doesn't assume that by default — getting this wrong produces a distinctive alternating black/white column artifact (each 16-bit sample's near-zero high byte and varying low byte get read as two separate 8-bit pixels).
+
+### Known issues (resolved)
+
+- ~~**Pixel format mapping**: Mono10 output showed visible column artifacts.~~ Resolved — caused by a combination of (1) GStreamer caps not specifying `format=GRAY16_LE`, letting the camera silently fall back to Mono8, and (2) ImageMagick defaulting to big-endian when reading the raw buffer. Fixed by capturing via the direct Aravis API (which reports the camera's actual pixel format with certainty) and specifying `-endian LSB` during conversion.
+- ~~**Pipeline EOF/termination**: `aravissrc` did not reliably send EOS after `num-buffers` was reached.~~ Resolved by dropping the GStreamer capture path entirely in favor of `arv-snapshot`, which uses a single blocking `arv_camera_acquisition()` call with no pipeline/EOS semantics involved.
 
 ---
 
